@@ -66,7 +66,7 @@ def set_requires_grad(parameters, requires_grad):
     for p in parameters:
         p.requires_grad = requires_grad
 
-def create_model_and_processor(
+def _and_processor(
         model_config, peft_lora_config, training_args,
         cache_dir=None,
     ):

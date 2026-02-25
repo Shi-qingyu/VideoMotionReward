@@ -8,5 +8,7 @@ anno
 checkpoints
 datasets
 rm_output
+ds_config
 .vscode
 .DS_Store
+videogen-rewardbench-output

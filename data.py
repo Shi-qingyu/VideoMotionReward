@@ -51,7 +51,7 @@ def convert_GSB_csv_to_reward_data(example, data_dir, eval_dims=["VQ"], max_pixe
             "content": [
                 {
                     "type": "video", 
-                    "video": f"file://{data_dir}/{example[f'path_A']}", 
+                    "video": f"{data_dir}/{example[f'path_A']}", 
                     "max_pixels": max_pixels, 
                     "fps": fps if num_frames is None else None,
                     "nframes": min(num_frames, example[f"num_frames_A"]) if num_frames is not None else None,
@@ -67,7 +67,7 @@ def convert_GSB_csv_to_reward_data(example, data_dir, eval_dims=["VQ"], max_pixe
             "content": [
                 {
                     "type": "video", 
-                    "video": f"file://{data_dir}/{example[f'path_B']}", 
+                    "video": f"{data_dir}/{example[f'path_B']}", 
                     "max_pixels": max_pixels, 
                     "fps": fps if num_frames is None else None,
                     "nframes": min(num_frames, example[f"num_frames_B"]) if num_frames is not None else None,

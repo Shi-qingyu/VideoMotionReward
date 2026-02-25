@@ -4,3 +4,9 @@ wandb
 debug.sh
 _temp_videos
 anno
+
+checkpoints
+datasets
+rm_output
+.vscode
+.DS_Store

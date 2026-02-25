@@ -113,6 +113,7 @@ def create_model_and_processor(
         model.to(torch.bfloat16)
     if training_args.fp16:
         model.to(torch.float16)
+    # model.to("cuda")
 
     # create lora and peft model
     if peft_lora_config.lora_enable:

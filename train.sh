@@ -14,9 +14,9 @@ deepspeed --master_port=28500 train_reward.py \
     --torch_dtype "bfloat16" \
     --num_lora_modules -1 \
     --model_name_or_path Qwen/Qwen2-VL-2B-Instruct \
-    --meta_data "/path/to/your_code/videoreward/datasets/train/example.csv" \
-    --meta_data_test "/path/to/your_code/videoreward/datasets/train/example.csv" \
-    --data_dir "/path/to/your_code/videoreward/datasets/train" \
+    --meta_data "datasets/train/example.csv" \
+    --meta_data_test "datasets/train/example.csv" \
+    --data_dir "datasets/train" \
     --output_dir rm_output \
     --eval_dim "VQ" "MQ" "TA" \
     --output_dim 3 \
@@ -37,9 +37,9 @@ deepspeed --master_port=28500 train_reward.py \
     --warmup_ratio 0.05 \
     --lr_scheduler_type "constant_with_warmup" \
     --eval_strategy "steps" \
-    --logging_epochs 0.01 \
-    --eval_epochs 0.1 \
-    --save_epochs 0.25 \
+    --logging_epochs 1 \
+    --eval_epochs 1 \
+    --save_epochs 1 \
     --max_length 6144 \
     --gradient_checkpointing False \
     --deepspeed ds_config/zero0.json \

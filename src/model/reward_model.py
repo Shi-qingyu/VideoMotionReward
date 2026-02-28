@@ -1,97 +1,106 @@
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 import torch
 import torch.nn as nn
 
+from transformers.cache_utils import Cache
+from transformers.utils.generic import ModelOutput, TransformersKwargs
 from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLForConditionalGeneration
+from transformers.models.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
 
-class Qwen3VLRewardModel(Qwen3VLForConditionalGeneration):
-    def __init__(self, config, output_dim, special_token_ids):
-        super().__init__(config)
-        self.output_dim = output_dim
-        self.rm_head = nn.Linear(config.hidden_size, output_dim, bias=False)
+
+class Qwen3VLCoTRewardModelOutput(ModelOutput):
+    loss: torch.FloatTensor | None = None
+    logits: torch.FloatTensor | None = None
+    past_key_values: Cache | None = None
+    hidden_states: tuple[torch.FloatTensor] | None = None
+    attentions: tuple[torch.FloatTensor] | None = None
+    rope_deltas: torch.LongTensor | None = None
+    score: torch.FloatTensor | None = None
+    
+
+class Qwen3VLCoTRewardModelConfig(Qwen3VLConfig):
+    def __init__(
+        self, 
+        special_token_ids, 
+        score_levels,
+        score_weight,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.score_levels = score_levels
+        self.score_weight = score_weight
         self.special_token_ids = special_token_ids
+
+
+class Qwen3VLCoTRewardModel(Qwen3VLForConditionalGeneration):
+    def __init__(self, config):
+        super().__init__(config)
+        self.score_levels = config.score_levels
+        self.score_weight = config.score_weight
+        self.special_token_ids = list(config.special_token_ids)
+        
+        self.score_head = nn.Linear(config.text_config.hidden_size, config.score_levels, bias=False)
         
     def forward(
         self,
         input_ids: torch.LongTensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[List[torch.Tensor]] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        pixel_values: Optional[torch.Tensor] = None,
-        pixel_values_videos: Optional[torch.Tensor] = None,
-        image_grid_thw: Optional[torch.LongTensor] = None,
-        video_grid_thw: Optional[torch.LongTensor] = None,
-        rope_deltas: Optional[torch.Tensor] = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
+        past_key_values: Cache | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        labels: Dict[str, torch.LongTensor] | None = None,
+        pixel_values: torch.Tensor | None = None,
+        pixel_values_videos: torch.FloatTensor | None = None,
+        image_grid_thw: torch.LongTensor | None = None,
+        video_grid_thw: torch.LongTensor | None = None,
+        cache_position: torch.LongTensor | None = None,
+        logits_to_keep: int | torch.Tensor = 0,
+        **kwargs: TransformersKwargs,
     ):
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        if inputs_embeds is None:
-            inputs_embeds: torch.Tensor = self.model.embed_tokens(input_ids)
-            if pixel_values is not None:
-                pixel_values = pixel_values.type(self.visual.get_dtype())
-                image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
-                image_mask = (input_ids == self.config.image_token_id).unsqueeze(-1).expand_as(inputs_embeds)
-                image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
-                inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
-
-            if pixel_values_videos is not None:
-                pixel_values_videos = pixel_values_videos.type(self.visual.get_dtype())
-                video_embeds = self.visual(
-                    pixel_values_videos, 
-                    grid_thw=video_grid_thw
-                )
-                video_mask = (input_ids == self.config.video_token_id).unsqueeze(-1).expand_as(inputs_embeds)
-                video_embeds = video_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
-                inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
-
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(inputs_embeds.device)
+        batch_size = input_ids.shape[0]
 
         outputs = self.model(
-            input_ids=None,
+            input_ids=input_ids,
+            pixel_values=pixel_values,
+            pixel_values_videos=pixel_values_videos,
+            image_grid_thw=image_grid_thw,
+            video_grid_thw=video_grid_thw,
             position_ids=position_ids,
             attention_mask=attention_mask,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+            cache_position=cache_position,
+            **kwargs,
         )
         
         hidden_states = outputs[0]  # [B, L, D]
-        logits = self.rm_head(hidden_states)    # [B, L, N]
-
-        batch_size = input_ids.shape[0]
-
-        ## get sequence length
-        if self.config.pad_token_id is None and batch_size != 1:
-            raise ValueError("Cannot handle batch sizes > 1 if no padding token is defined.")
-        if self.config.pad_token_id is None:
-            sequence_lengths = -1
-        else:
-            sequence_lengths = torch.eq(input_ids, self.config.pad_token_id).int().argmax(-1) - 1
-            sequence_lengths = sequence_lengths % input_ids.shape[-1]
-            sequence_lengths = sequence_lengths.to(logits.device)
+        
+        logits = self.lm_head(hidden_states)
 
         special_token_mask = torch.zeros_like(input_ids, dtype=torch.bool)
         for special_token_id in self.special_token_ids:
             special_token_mask = special_token_mask | (input_ids == special_token_id)
-        pooled_logits = logits[special_token_mask, ...]
-        pooled_logits = pooled_logits.view(batch_size, 3, -1)   # [B, 3, N] assert 3 attributes
-        if self.output_dim == 3:
-            pooled_logits = pooled_logits.diagonal(dim1=1, dim2=2)
-        pooled_logits = pooled_logits.view(batch_size, -1)
+        assert all(special_token_mask.sum(dim=-1) == len(self.special_token_ids)), f"Number of special tokens in each sample must be {len(self.special_token_ids)}"
         
-        return {"logits": pooled_logits}
+        socre_hidden_states = hidden_states[special_token_mask]
+        score_logits = self.score_head(socre_hidden_states)
+        score_logits = score_logits.view(batch_size, len(self.special_token_ids), -1)   # [B, N_special, -1]
+        
+        loss = None
+        if labels is not None:
+            lm_labels = labels["lm"]    # [B, L]
+            score_labels = labels["score"]  # [B, N_special]
+            loss = self.loss_function(logits=logits, labels=lm_labels, vocab_size=self.config.text_config.vocab_size)
+            score_loss = nn.CrossEntropyLoss(reduction="none")(score_logits, score_labels)
+            loss = loss + self.score_weight * score_loss.mean()
+        
+        return Qwen3VLCoTRewardModelOutput(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            rope_deltas=outputs.rope_deltas,
+            score=score_logits,
+        )

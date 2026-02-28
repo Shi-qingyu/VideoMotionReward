@@ -29,8 +29,8 @@ def save_configs_to_json(data_config, training_args, model_config, peft_lora_con
         "peft_lora_config": asdict(peft_lora_config),
     }
     # del information about local device
-    del config_dict["training_args"]["local_rank"]
-    del config_dict["training_args"]["_n_gpu"]
+    # del config_dict["training_args"]["local_rank"]
+    # del config_dict["training_args"]["_n_gpu"]
 
     save_path = os.path.join(training_args.output_dir, "model_config.json")
 
@@ -81,7 +81,7 @@ def create_model_and_processor(
         revision=model_config.model_revision,
         device_map=get_kbit_device_map() if quantization_config is not None else None,
         quantization_config=quantization_config,
-        use_cache=True if training_args.gradient_checkpointing else False,
+        # use_cache=True if training_args.gradient_checkpointing else False,
     )
     # pdb.set_trace()
 
@@ -204,8 +204,8 @@ def train():
 
     if not peft_lora_config.vision_lora:
         # set requires_grad for visual encoder and merger
-        set_requires_grad(model_to_configure.visual.parameters(), not model_config.freeze_vision_tower)
-        set_requires_grad(model_to_configure.visual.merger.parameters(), model_config.tune_merger)
+        set_requires_grad(model_to_configure.model.visual.parameters(), not model_config.freeze_vision_tower)
+        set_requires_grad(model_to_configure.model.visual.merger.parameters(), model_config.tune_merger)
 
     # set requires_grad for regression head
     set_requires_grad(model_to_configure.rm_head.parameters(), True)
@@ -271,7 +271,7 @@ def train():
     special_token_ids = model.special_token_ids
     callbacks = []
     if special_token_ids is not None:
-        callbacks.append(PartialEmbeddingUpdateCallback(special_token_ids))
+        callbacks.append(PartialEmbeddingUpdateCallback(special_token_ids, tokenizer=processor.tokenizer))
 
     trainer = VideoVLMRewardTrainer(
         model=model,
@@ -280,10 +280,10 @@ def train():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=valid_dataset if training_args.conduct_eval else None,
-        peft_config=peft_config,
+        # peft_config=peft_config,
         callbacks=callbacks,
         loss_type=model_config.loss_type,
-        tokenizer=processor.tokenizer,
+        # tokenizer=processor.tokenizer,
     )
 
     trainer.train()

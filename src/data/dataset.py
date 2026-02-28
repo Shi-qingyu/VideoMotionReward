@@ -115,38 +115,3 @@ def convert_GSB_csv_to_reward_data(
         metainfo_idx=metainfo_idx,
     )
     return ret
-
-
-def create_dataset(data_config):
-    dataset: DatasetDict = load_dataset('csv', data_files=data_config.meta_file)
-    
-    def add_idx(example, idx):
-        example['metainfo_idx'] = idx
-        return example
-    
-    dataset['train'] = dataset['train'].map(
-        lambda example, idx: add_idx(example, idx), 
-        with_indices=True
-    ) 
-    
-    if not data_config.use_tied_data:
-        filter_func = lambda example: any(example[f"{dim}"] != "same" for dim in data_config.eval_dim)
-        dataset = dataset.filter(filter_func)
-
-    # convert data to reward data
-    convert_func = lambda example: convert_GSB_csv_to_reward_data(
-        example, 
-        data_config.data_dir, 
-        data_config.eval_dim, 
-        data_config.max_frame_pixels, 
-        data_config.fps, 
-        data_config.num_frames,
-        data_config.prompt_template_type,
-        sample_type=data_config.sample_type,
-    )
-    dataset = dataset.map(
-        convert_func, 
-        remove_columns=dataset['train'].column_names, 
-        load_from_cache_file=False
-    )
-    return dataset['train']

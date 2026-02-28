@@ -15,7 +15,7 @@ import datasets
 from torch.utils.data import Dataset, DataLoader
 from peft import PeftModel
 from transformers import Qwen2VLForConditionalGeneration, Qwen3VLForConditionalGeneration
-from transformers import AutoConfig
+from transformers import Trainer
 from transformers.modeling_utils import PreTrainedModel
 from transformers.trainer import TrainerCallback
 from transformers.trainer import (
@@ -39,9 +39,9 @@ from transformers.trainer import (
     denumpify_detensorize,
     PredictionOutput,
     EvalLoopOutput,
-    DistributedTensorGatherer,
-    SequentialDistributedSampler,
-    nested_concat,
+    # DistributedTensorGatherer,
+    # SequentialDistributedSampler,
+    # nested_concat,
 )
 from transformers.trainer_callback import TrainerControl, TrainerState
 
@@ -61,7 +61,7 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         super().__init__(config)
         # pdb.set_trace()
         self.output_dim = output_dim
-        self.rm_head = nn.Linear(config.hidden_size, output_dim, bias=False)
+        self.rm_head = nn.Linear(config.text_config.hidden_size, output_dim, bias=False)
         self.reward_token = reward_token
 
         self.special_token_ids = special_token_ids
@@ -94,19 +94,19 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         # pdb.set_trace()
         if inputs_embeds is None:
-            inputs_embeds = self.model.embed_tokens(input_ids)
+            inputs_embeds = self.model.get_input_embeddings()(input_ids)
             if pixel_values is not None:
-                pixel_values = pixel_values.type(self.visual.get_dtype())
-                image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
+                pixel_values = pixel_values.type(self.model.visual.get_dtype())
+                image_embeds = self.model.visual(pixel_values, grid_thw=image_grid_thw)
                 image_mask = (input_ids == self.config.image_token_id).unsqueeze(-1).expand_as(inputs_embeds)
                 image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
                 inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
 
             if pixel_values_videos is not None:
-                pixel_values_videos = pixel_values_videos.type(self.visual.get_dtype())
-                video_embeds = self.visual(pixel_values_videos, grid_thw=video_grid_thw)
+                pixel_values_videos = pixel_values_videos.type(self.model.visual.get_dtype())
+                video_embeds = self.model.visual(pixel_values_videos, grid_thw=video_grid_thw)
                 video_mask = (input_ids == self.config.video_token_id).unsqueeze(-1).expand_as(inputs_embeds)
-                video_embeds = video_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+                video_embeds = video_embeds.pooler_output.to(inputs_embeds.device, inputs_embeds.dtype)
                 inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
 
             if attention_mask is not None:
@@ -337,10 +337,11 @@ class PartialEmbeddingUpdateCallback(TrainerCallback):
     Callback to update the embedding of special tokens
     Only the special tokens are updated, the rest of the embeddings are kept fixed
     """
-    def __init__(self, special_token_ids):
+    def __init__(self, special_token_ids, tokenizer):
         super().__init__()
         self.special_token_ids = special_token_ids
         self.orig_embeds_params = None 
+        self.tokenizer = tokenizer
 
     def on_train_begin(self, args, state, control, **kwargs):
         model = kwargs.get("model")
@@ -349,16 +350,15 @@ class PartialEmbeddingUpdateCallback(TrainerCallback):
     def on_step_end(self, args, state, control, **kwargs):
         # pdb.set_trace()
         model = kwargs.get("model")
-        tokenizer = kwargs.get("tokenizer")
 
-        index_no_updates = torch.ones((len(tokenizer),), dtype=torch.bool)
+        index_no_updates = torch.ones((len(self.tokenizer),), dtype=torch.bool)
         index_no_updates[self.special_token_ids] = False
         with torch.no_grad():
             model.get_input_embeddings().weight[index_no_updates] = self.orig_embeds_params[index_no_updates]
             
 
                 
-class VideoVLMRewardTrainer(RewardTrainer):
+class VideoVLMRewardTrainer(Trainer):
     def __init__(self, loss_type="regular", enable_noise_in_eval=False, *args, **kwargs):
         super(VideoVLMRewardTrainer, self).__init__(*args, **kwargs)
 
@@ -534,15 +534,13 @@ class VideoVLMRewardTrainer(RewardTrainer):
 
         return self.optimizer
     
-    # def training_step(self, model, inputs, num_items_in_batch=None):
-    #     pdb.set_trace()
-    #     return super(VideoVLMRewardTrainer, self).training_step(model, inputs, num_items_in_batch)
 
     def compute_loss(
         self,
         model,
         inputs,
         return_outputs=False,
+        **kwargs,
     ):
         rewards_A = model(
             return_dict=True,

@@ -29,6 +29,7 @@ class TrainingConfig(TrainingArguments):
     remove_unused_columns: Optional[bool] = False
 
     save_full_model: Optional[bool] = False
+    save_safetensors: Optional[bool] = False
 
 @dataclass
 class PEFTLoraConfig:
